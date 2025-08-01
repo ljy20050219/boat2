@@ -4,14 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>代码运行日志记录器</title>
-    <!-- 引入Tailwind CSS -->
+    <!-- 引入Tailwind CSS美化界面 -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 引入代码编辑器 -->
+    <!-- 引入代码编辑器样式 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/mode/python/python.min.js"></script>
-    <!-- 引入Pyodide（关键：增加加载超时和重试机制） -->
-    <script id="pyodide-script" src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen p-4 md:p-8">
     <div class="max-w-4xl mx-auto bg-white rounded-xl shadow-lg p-6">
@@ -19,7 +17,7 @@
         
         <!-- 状态提示区 -->
         <div id="status-area" class="mb-4 p-3 rounded-lg bg-yellow-50 text-yellow-800 text-sm hidden">
-            <i class="fa fa-info-circle mr-2"></i><span id="status-message">正在准备环境...</span>
+            <span id="status-message">正在准备环境...</span>
         </div>
         
         <!-- 按钮区域 -->
@@ -30,17 +28,20 @@
             <button id="run-code-btn" class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg transition" disabled>
                 运行代码
             </button>
-            <button id="clear-log-btn" class="bg-orange-500 hover:orange-600 text-white px-4 py-2 rounded-lg transition">
+            <button id="clear-log-btn" class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg transition">
                 清空日志
             </button>
         </div>
         
-        <!-- 代码输入区 -->
+        <!-- 代码输入区（默认隐藏） -->
         <div id="code-input-area" class="hidden mb-6">
             <div class="mb-2 text-sm text-gray-600">
                 输入Python代码（支持print输出）：
             </div>
             <textarea id="code-editor" rows="8"></textarea>
+            <div class="mt-2 text-xs text-gray-500">
+                ⚠️ 注意：请使用英文标点符号，避免使用全角字符
+            </div>
         </div>
         
         <!-- 运行结果区 -->
@@ -54,21 +55,17 @@
             <h2 class="text-lg font-semibold text-gray-700 mb-2">历史日志 <span id="log-count" class="text-sm text-gray-500">(0条记录)</span></h2>
             <div id="logs-area" class="border border-gray-300 rounded-lg p-3 max-h-[300px] overflow-y-auto bg-gray-50"></div>
         </div>
-        
-        <!-- 帮助提示 -->
-        <div class="mt-6 text-xs text-gray-500 italic">
-            <p>💡 使用提示：如果环境加载失败，请检查网络连接并刷新页面重试</p>
-        </div>
     </div>
 
+    <!-- 引入Pyodide（核心：让浏览器运行Python） -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.0/full/pyodide.js"></script>
+
     <script>
-        // 全局变量
+        // 初始化Python环境 - 添加重试机制
         let pyodide;
-        let editor;
         let loadAttempts = 0;
-        const MAX_LOAD_ATTEMPTS = 3; // 最大重试次数
+        const MAX_ATTEMPTS = 3;
         
-        // 显示状态提示
         function showStatus(message, isError = false) {
             const statusArea = document.getElementById('status-area');
             const statusMessage = document.getElementById('status-message');
@@ -83,160 +80,149 @@
             }
         }
         
-        // 隐藏状态提示
-        function hideStatus() {
-            document.getElementById('status-area').classList.add('hidden');
-        }
-        
-        // 初始化Python环境（带重试机制）
         async function initPython() {
-            // 显示加载状态
-            showStatus("正在加载Python环境，这可能需要1-2分钟...");
-            document.getElementById('result-area').textContent = "环境加载中，请稍候...";
-            
             try {
-                // 检查Pyodide是否已加载
+                showStatus("正在加载Python环境，请稍候...");
+                document.getElementById('result-area').textContent = "正在加载Python环境，请稍候...";
+                
+                // 检查Pyodide是否加载
                 if (typeof loadPyodide === 'undefined') {
-                    // 等待脚本加载完成
-                    await new Promise((resolve, reject) => {
-                        const script = document.getElementById('pyodide-script');
-                        const checkLoaded = () => {
-                            if (typeof loadPyodide !== 'undefined') {
-                                resolve();
-                            } else if (loadAttempts < MAX_LOAD_ATTEMPTS) {
-                                loadAttempts++;
-                                setTimeout(checkLoaded, 2000); // 每2秒检查一次
-                            } else {
-                                reject(new Error("Pyodide脚本加载失败"));
-                            }
-                        };
-                        checkLoaded();
-                    });
+                    if (loadAttempts < MAX_ATTEMPTS) {
+                        loadAttempts++;
+                        showStatus(`环境加载中，正在重试（${loadAttempts}/${MAX_ATTEMPTS}）...`);
+                        setTimeout(initPython, 2000);
+                        return;
+                    } else {
+                        throw new Error("无法加载必要的组件，请检查网络连接后刷新页面");
+                    }
                 }
                 
                 // 加载Pyodide
                 pyodide = await loadPyodide({
-                    indexURL: "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/",
-                    fullStdLib: false // 减小加载体积，加快速度
+                    indexURL: "https://cdn.jsdelivr.net/pyodide/v0.25.0/full/"
                 });
                 
-                // 加载成功
+                // 加载完成，启用运行按钮
                 document.getElementById('run-code-btn').disabled = false;
                 document.getElementById('result-area').textContent = "Python环境已就绪，可以运行代码了！";
-                hideStatus();
+                showStatus("Python环境加载成功", false);
+                setTimeout(() => document.getElementById('status-area').classList.add('hidden'), 3000);
                 
             } catch (error) {
-                // 加载失败处理
-                const errorMsg = `环境加载失败: ${error.message}`;
-                document.getElementById('result-area').textContent = errorMsg;
-                
-                if (loadAttempts < MAX_LOAD_ATTEMPTS) {
-                    showStatus(`加载失败，正在重试（${loadAttempts}/${MAX_LOAD_ATTEMPTS}）...`);
-                    setTimeout(initPython, 3000); // 3秒后重试
-                } else {
-                    showStatus(
-                        `多次尝试后仍无法加载环境，请尝试：1. 检查网络连接 2. 刷新页面 3. 使用Chrome浏览器`, 
-                        true
-                    );
-                }
+                document.getElementById('result-area').textContent = `Python环境加载失败：${error.message}`;
+                showStatus(`加载失败: ${error.message}`, true);
             }
         }
 
-        // 初始化编辑器
-        function initEditor() {
-            editor = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
-                mode: "python",
-                lineNumbers: true,
-                theme: "default",
-                indentUnit: 4,
-                smartIndent: true,
-                readOnly: false
-            });
-            
-            // 预设示例代码，方便用户直接使用
-            const exampleCode = `# 示例代码：计算1到10的和
+        // 初始化代码编辑器
+        const editor = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+            mode: "python",
+            lineNumbers: true,
+            theme: "default",
+            indentUnit: 4,
+            smartIndent: true
+        });
+        
+        // 添加示例代码
+        editor.setValue(`# 示例代码：计算1到10的和
 total = 0
 for i in range(1, 11):
     total += i
 print("1到10的和是：", total)
 
-# 尝试修改代码，点击"运行代码"查看结果`;
-            editor.setValue(exampleCode);
+# 尝试修改代码，体验功能`);
+
+        // DOM元素
+        const showCodeBtn = document.getElementById('show-code-btn');
+        const runCodeBtn = document.getElementById('run-code-btn');
+        const clearLogBtn = document.getElementById('clear-log-btn');
+        const codeInputArea = document.getElementById('code-input-area');
+        const resultArea = document.getElementById('result-area');
+        const logsArea = document.getElementById('logs-area');
+        const logCount = document.getElementById('log-count');
+
+        // 显示/隐藏代码编辑区
+        showCodeBtn.addEventListener('click', () => {
+            codeInputArea.classList.toggle('hidden');
+            if (!codeInputArea.classList.contains('hidden')) {
+                editor.focus();
+            }
+        });
+
+        // 处理全角字符转换
+        function convertFullWidthToHalfWidth(code) {
+            return code
+                .replace(/[\uff01-\uff5e]/g, function(ch) {
+                    // 全角转半角
+                    return String.fromCharCode(ch.charCodeAt(0) - 0xfee0);
+                })
+                .replace(/\u3000/g, ' '); // 全角空格转半角空格
         }
 
-        // 绑定事件
-        function bindEvents() {
-            // 显示/隐藏代码编辑区
-            document.getElementById('show-code-btn').addEventListener('click', () => {
-                const area = document.getElementById('code-input-area');
-                area.classList.toggle('hidden');
-                if (!area.classList.contains('hidden')) {
-                    setTimeout(() => editor.focus(), 100);
-                }
-            });
+        // 运行代码
+        runCodeBtn.addEventListener('click', async () => {
+            let code = editor.getValue().trim();
+            if (!code) {
+                resultArea.textContent = "请先输入代码！";
+                return;
+            }
 
-            // 运行代码
-            document.getElementById('run-code-btn').addEventListener('click', async () => {
-                const code = editor.getValue().trim();
-                if (!code) {
-                    document.getElementById('result-area').textContent = "请先输入代码！";
-                    return;
-                }
+            try {
+                // 自动转换全角字符为半角
+                code = convertFullWidthToHalfWidth(code);
+                
+                showStatus("代码运行中...");
+                resultArea.textContent = "运行中...\n";
+                
+                // 重定向print输出
+                let output = "";
+                pyodide.globals.set("print", (text) => {
+                    output += text + "\n";
+                    resultArea.textContent = output;
+                });
+                
+                // 运行代码
+                await pyodide.runPythonAsync(code);
+                resultArea.textContent = output;
+                showStatus("代码运行成功", false);
+                setTimeout(() => document.getElementById('status-area').classList.add('hidden'), 2000);
+                
+                // 记录日志
+                const log = {
+                    time: new Date().toLocaleString(),
+                    result: output
+                };
+                saveLog(log);
+                renderLogs();
 
-                try {
-                    showStatus("代码运行中...");
-                    let output = "";
-                    pyodide.globals.set("print", (text) => {
-                        output += text + "\n";
-                        document.getElementById('result-area').textContent = output;
-                    });
-                    
-                    await pyodide.runPythonAsync(code);
-                    document.getElementById('result-area').textContent = output;
-                    
-                    // 记录日志
-                    const log = {
-                        time: new Date().toLocaleString(),
-                        result: output
-                    };
-                    saveLog(log);
-                    renderLogs();
-                    hideStatus();
+            } catch (error) {
+                const errorMsg = `运行错误：\n${error.message}\n\n提示：请检查代码中是否使用了中文标点或全角字符`;
+                resultArea.textContent = errorMsg;
+                showStatus("代码运行出错", true);
+            }
+        });
 
-                } catch (error) {
-                    const errorMsg = `运行错误：\n${error.message}`;
-                    document.getElementById('result-area').textContent = errorMsg;
-                    showStatus("代码运行出错", true);
-                }
-            });
-
-            // 清空日志
-            document.getElementById('clear-log-btn').addEventListener('click', () => {
-                if (confirm("确定要清空所有日志记录吗？")) {
-                    localStorage.removeItem('codeLogs');
-                    logs = [];
-                    renderLogs();
-                }
-            });
-
-            // 实时保存代码
-            editor.on('change', saveCodeToLocal);
-            window.addEventListener('beforeunload', saveCodeToLocal);
-        }
+        // 清空日志
+        clearLogBtn.addEventListener('click', () => {
+            if (confirm("确定要清空所有日志记录吗？")) {
+                localStorage.removeItem('codeLogs');
+                logs = [];
+                renderLogs();
+            }
+        });
 
         // 日志管理
         let logs = JSON.parse(localStorage.getItem('codeLogs') || '[]');
 
+        // 保存日志
         function saveLog(log) {
             logs.unshift(log);
             if (logs.length > 100) logs.pop();
             localStorage.setItem('codeLogs', JSON.stringify(logs));
         }
 
+        // 渲染日志
         function renderLogs() {
-            const logCount = document.getElementById('log-count');
-            const logsArea = document.getElementById('logs-area');
-            
             logCount.textContent = `(${logs.length}条记录)`;
             
             if (logs.length === 0) {
@@ -279,7 +265,7 @@ print("1到10的和是：", total)
         function loadCodeFromLocal() {
             try {
                 const savedCode = localStorage.getItem('savedPythonCode');
-                if (savedCode && editor) {
+                if (savedCode) {
                     editor.setValue(savedCode);
                 }
             } catch (e) {
@@ -297,14 +283,19 @@ print("1到10的和是：", total)
                 .replace(/'/g, "&#039;");
         }
 
-        // 页面初始化（严格控制顺序）
+        // 页面初始化
         window.addEventListener('DOMContentLoaded', () => {
-            initEditor();       // 1. 先初始化编辑器
-            loadCodeFromLocal();// 2. 加载保存的代码
-            bindEvents();       // 3. 绑定事件
-            initPython();       // 4. 最后初始化Python环境
-            renderLogs();       // 5. 渲染日志
+            loadCodeFromLocal();
+            // 确保编辑器初始化完成后再加载Python环境
+            setTimeout(initPython, 500);
+            renderLogs();
+            
+            // 实时保存代码
+            editor.on('change', saveCodeToLocal);
+            window.addEventListener('beforeunload', saveCodeToLocal);
+            showCodeBtn.addEventListener('click', saveCodeToLocal);
         });
     </script>
 </body>
 </html>
+    
